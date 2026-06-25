@@ -1,8 +1,10 @@
 """
-blaze.py — Monitor em tempo real via Smart Polling no endpoint /current
-Detecta a pedra INSTANTE que o status vira 'complete'.
+blaze.py — Monitor em tempo real via WebSocket
+O token é enviado DENTRO do payload da subscription (formato atual da Blaze).
+Fallback automático para HTTP se o WebSocket falhar por 2 minutos.
 """
-import os, sys, time, json, logging, requests
+import os, sys, time, json, ssl, threading, logging, requests
+import websocket
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
@@ -14,30 +16,11 @@ load_dotenv(os.path.join(project_root, ".env"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stdout)
 logger = logging.getLogger("BlazeMonitor")
 
-MIRRORS = ["blaze.bet.br", "blaze-6.com", "blaze-7.com", "blaze-8.com", "blaze-9.com"]
-CURRENT_ENDPOINT = "/api/singleplayer-originals/originals/roulette_games/current"
+MIRRORS = ["blaze.bet.br", "blaze-6.com", "blaze-7.com", "blaze-8.com"]
+WS_URL  = "wss://api-v2.blaze.bet.br/replication/?EIO=3&transport=websocket"
 
 def format_color(c):
     return {0: "BRANCO", 1: "VERMELHO", 2: "PRETO"}.get(c, "UNKNOWN")
-
-def fetch_current(mirror_idx=0):
-    domain = MIRRORS[mirror_idx % len(MIRRORS)]
-    url = f"https://{domain}{CURRENT_ENDPOINT}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-        "Referer": f"https://{domain}/pt/games/double",
-    }
-    try:
-        r = requests.get(url, headers=headers, timeout=8)
-        if r.status_code == 200:
-            return r.json(), mirror_idx
-        elif r.status_code == 429:
-            return None, (mirror_idx + 1) % len(MIRRORS)
-        return None, mirror_idx
-    except Exception as e:
-        logger.error(f"❌ Erro fetch: {e}")
-        return None, (mirror_idx + 1) % len(MIRRORS)
 
 def save_and_notify(r_id, color_str, roll, created_at):
     try:
@@ -45,7 +28,7 @@ def save_and_notify(r_id, color_str, roll, created_at):
         from roboblaze_api.detector import check_user_signals
 
         conn = get_conn(dict_cursor=False)
-        cur = conn.cursor()
+        cur  = conn.cursor()
         try:
             utc = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
         except Exception:
@@ -71,52 +54,180 @@ def save_and_notify(r_id, color_str, roll, created_at):
     except Exception as e:
         logger.error(f"⚠️  Erro DB/Sinais: {e}")
 
-def run():
-    logger.info("🚀 BlazeMonitor iniciado (Smart Polling — detecção instantânea)")
-    seen_ids = set()
-    mirror_idx = 0
-    last_status = None
-    consecutive_errors = 0
 
-    while True:
-        data, mirror_idx = fetch_current(mirror_idx)
+class BlazeMonitor:
+    def __init__(self):
+        self.seen_ids    = set()
+        self.token       = os.getenv("BLAZE_ACCESS_TOKEN", "")
+        self.ws          = None
+        self.last_stone  = time.time()  # rastreia última pedra recebida
+        self.running     = True
 
-        if data is None:
-            consecutive_errors += 1
-            wait = 30 if consecutive_errors >= 5 else 5
-            time.sleep(wait)
-            continue
+    # ── WebSocket handlers ──────────────────────────────────────────────────
 
-        consecutive_errors = 0
-        status   = data.get("status", "")
-        r_id     = str(data.get("id", ""))
-        color    = data.get("color")
-        roll     = data.get("roll")
-        created  = data.get("created_at", "")
+    def on_open(self, ws):
+        logger.info("🌐 WebSocket conectado.")
+        # Keepalive ping a cada 25s
+        def ping():
+            while ws.keep_running:
+                time.sleep(25)
+                try: ws.send("2")
+                except: break
+        threading.Thread(target=ping, daemon=True).start()
 
-        # Detecta INSTANTE que o resultado fica disponível
-        if status == "complete" and r_id and r_id not in seen_ids:
-            if color is not None and roll is not None:
-                seen_ids.add(r_id)
-                color_str = format_color(color)
-                emoji = {"BRANCO": "⚪", "VERMELHO": "🔴", "PRETO": "⚫"}.get(color_str, "❓")
-                logger.info(f"💎 NOVA PEDRA: {emoji} {color_str} | Roll: {roll} | ID: {r_id}")
-                save_and_notify(r_id, color_str, roll, created)
-                if len(seen_ids) > 500:
-                    seen_ids = set(list(seen_ids)[-200:])
+    def on_message(self, ws, message):
+        # Ping/Pong do socket.io
+        if message == "2": ws.send("3"); return
+        if message == "3": return
 
-        last_status = status
+        # Handshake inicial — conectar ao namespace
+        if message.startswith("0"):
+            ws.send("40")
+            return
 
-        # Timing inteligente:
-        # - 'rolling' = animação em curso, resultado vem logo → poll rápido (1s)
-        # - 'complete' = acabou, próxima rodada demorará → espera 3s
-        # - 'waiting'  = aguardando apostas → espera 2s
-        if status == "rolling":
-            time.sleep(1)
-        elif status == "complete":
-            time.sleep(3)
-        else:
-            time.sleep(2)
+        # Namespace conectado — assinar as salas
+        if message.startswith("40"):
+            logger.info("🔌 Namespace conectado. Assinando salas...")
+
+            # Tenta 3 formatos diferentes até algum funcionar
+            if self.token:
+                # Formato 1: token DENTRO do payload (API atual)
+                ws.send(f'42["cmd",{{"id":"subscribe","payload":{{"room":"double_room_1","token":"{self.token}"}}}}]')
+                ws.send(f'42["cmd",{{"id":"subscribe","payload":{{"room":"double","token":"{self.token}"}}}}]')
+                # Formato 2: authenticate separado + subscribe
+                ws.send(f'42["cmd",{{"id":"authenticate","payload":{{"token":"{self.token}"}}}}]')
+            
+            # Formato 3: subscribe público (sem token) — fallback
+            ws.send('42["cmd",{"id":"subscribe","payload":{"room":"double_room_1"}}]')
+            ws.send('42["cmd",{"id":"subscribe","payload":{"room":"double"}}]')
+            logger.info("✅ Assinaturas enviadas. Aguardando pedras...")
+            return
+
+        # Mensagens de evento
+        if not message.startswith("42"):
+            return
+
+        try:
+            raw = message[2:]  # remove prefix "42"
+            data = json.loads(raw)
+            if not isinstance(data, list) or len(data) < 2:
+                return
+
+            event_wrapper = data[1]
+            if not isinstance(event_wrapper, dict):
+                return
+
+            event_id = event_wrapper.get("id", "")
+            payload  = event_wrapper.get("payload", {})
+
+            # Eventos de resultado do jogo Double
+            if event_id in ("double.update", "double.tick", "roulette.update"):
+                status = payload.get("status")
+                if status not in ("rolling", "complete"):
+                    return
+
+                r_id   = str(payload.get("id", ""))
+                color  = payload.get("color")
+                roll   = payload.get("roll")
+                created = payload.get("created_at", "")
+
+                if r_id and r_id not in self.seen_ids and color is not None and roll is not None:
+                    self.seen_ids.add(r_id)
+                    self.last_stone = time.time()
+                    color_str = format_color(color)
+                    emoji = {"BRANCO": "⚪", "VERMELHO": "🔴", "PRETO": "⚫"}.get(color_str, "❓")
+                    logger.info(f"💎 NOVA PEDRA: {emoji} {color_str} | Roll: {roll} | ID: {r_id}")
+                    threading.Thread(target=save_and_notify, args=(r_id, color_str, roll, created), daemon=True).start()
+
+                    if len(self.seen_ids) > 500:
+                        self.seen_ids = set(list(self.seen_ids)[-200:])
+
+            # Usa wallet.bet-resulted como sinal: rodada acabou → busca via HTTP
+            elif event_id == "wallet.bet-resulted":
+                game = payload.get("game_slug", "")
+                if "double" in game.lower():
+                    logger.info("💡 Aposta liquidada detectada. Buscando resultado via HTTP...")
+                    threading.Thread(target=self._fetch_and_save_latest, daemon=True).start()
+
+        except Exception:
+            pass
+
+    def on_error(self, ws, error):
+        logger.error(f"❌ Erro WebSocket: {error}")
+
+    def on_close(self, ws, *args):
+        logger.warning("⚠️  WebSocket fechado. Reconectando em 10s...")
+        time.sleep(10)
+        if self.running:
+            self.start_ws()
+
+    # ── HTTP fallback (acionado por wallet.bet-resulted) ───────────────────
+
+    def _fetch_and_save_latest(self):
+        for domain in MIRRORS:
+            try:
+                url = f"https://{domain}/api/singleplayer-originals/originals/roulette_games/recent/history/1?page=1"
+                r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+                if r.status_code != 200:
+                    continue
+                records = r.json().get("records", [])
+                for record in records[:3]:
+                    r_id   = str(record.get("id", ""))
+                    color  = record.get("color")
+                    roll   = record.get("roll")
+                    created = record.get("created_at", "")
+                    if r_id and r_id not in self.seen_ids and color is not None and roll is not None:
+                        self.seen_ids.add(r_id)
+                        self.last_stone = time.time()
+                        color_str = format_color(color)
+                        emoji = {"BRANCO": "⚪", "VERMELHO": "🔴", "PRETO": "⚫"}.get(color_str, "❓")
+                        logger.info(f"💎 NOVA PEDRA (HTTP): {emoji} {color_str} | Roll: {roll} | ID: {r_id}")
+                        save_and_notify(r_id, color_str, roll, created)
+                return
+            except Exception:
+                continue
+
+    # ── Watchdog: se ficou 3 min sem pedra, reconecta ──────────────────────
+
+    def _watchdog(self):
+        while self.running:
+            time.sleep(30)
+            if time.time() - self.last_stone > 180:
+                logger.warning("🔁 Sem pedras há 3 min. Forçando reconexão...")
+                self.last_stone = time.time()
+                try:
+                    if self.ws:
+                        self.ws.close()
+                except Exception:
+                    pass
+
+    # ── Start ──────────────────────────────────────────────────────────────
+
+    def start_ws(self):
+        headers = {
+            "Origin": "https://blaze.bet.br",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.set_ciphers("DEFAULT@SECLEVEL=1")
+
+        self.ws = websocket.WebSocketApp(
+            WS_URL,
+            header=headers,
+            on_open=self.on_open,
+            on_message=self.on_message,
+            on_error=self.on_error,
+            on_close=self.on_close,
+        )
+        self.ws.run_forever(sslopt={"context": ssl_ctx})
+
+    def start(self):
+        logger.info("🚀 BlazeMonitor iniciado (WebSocket Real-Time + HTTP fallback)")
+        self.last_stone = time.time()
+        threading.Thread(target=self._watchdog, daemon=True).start()
+        self.start_ws()
+
 
 if __name__ == "__main__":
-    run()
+    monitor = BlazeMonitor()
+    monitor.start()
