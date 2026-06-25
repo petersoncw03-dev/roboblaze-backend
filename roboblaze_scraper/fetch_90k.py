@@ -90,12 +90,8 @@ async def fetch_90k_history():
     logger.info("🚀 [MIGRAÇÃO SCRAPER] INICIANDO O RESGATE DE 90.000 PEDRAS ANTIGAS...")
     logger.info("="*60)
     
-    # 1. Limpar tabela results por completo antes de começar
-    logger.info("🧹 Limpando tabela de resultados no PostgreSQL para alinhamento 100% limpo...")
-    async with AsyncSessionLocal() as session:
-        await session.execute(text("TRUNCATE TABLE results;"))
-        await session.commit()
-    logger.info("✅ Tabela results limpa com sucesso.")
+    # 1. TRUNCATE removido para preservar dados de lucro recentes.
+    logger.info("Mantendo os dados existentes no banco...")
     
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     
