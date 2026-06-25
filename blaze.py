@@ -237,6 +237,8 @@ class BlazeMonitor:
             print("✅ Monitoramento HFT ativo. Aguardando resultados ao vivo sem lag...", flush=True)
             
         elif message.startswith("42"):
+            # DEBUG TEMP: ver mensagens cruas da Blaze
+            print(f"📨 MSG: {message[:250]}", flush=True)
             try:
                 json_str = message.split("[", 1)[1]
                 json_str = "[" + json_str
