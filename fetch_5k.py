@@ -1,21 +1,19 @@
 import asyncio
 import httpx
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import logging
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import text
 import os
-import time
 from dotenv import load_dotenv
 
-# Importa as configurações do banco de dados do main/database
-from database import AsyncSessionLocal, Result
+# Importa as configurações do banco de dados
+from roboblaze_scraper.database import AsyncSessionLocal, Result
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger("Fetch90k")
+logger = logging.getLogger("Fetch5k")
 
-# Lista de espelhos da Blaze para contornar qualquer limite da Cloudflare (HTTP 429)
+# Lista de espelhos da Blaze para contornar limites da Cloudflare
 MIRRORS = [
     "blaze-6.com",
     "blaze-7.com",
@@ -32,6 +30,17 @@ def format_color(color_int: int) -> str:
     elif color_int == 1: return "VERMELHO"
     elif color_int == 2: return "PRETO"
     return "UNKNOWN"
+
+def get_proxy_url():
+    host = os.getenv("PROXY_HOST")
+    port = os.getenv("PROXY_PORT")
+    user = os.getenv("PROXY_USER")
+    password = os.getenv("PROXY_PASS")
+    if host and port:
+        if user and password:
+            return f"http://{user}:{password}@{host}:{port}"
+        return f"http://{host}:{port}"
+    return None
 
 async def save_results_batch(results: list):
     if not results: return
@@ -85,13 +94,10 @@ async def fetch_page_with_mirror_rotation(client, page, end_date_str, attempt=1)
         else:
             raise e
 
-async def fetch_90k_history():
+async def fetch_5k_history():
     logger.info("="*60)
-    logger.info("🚀 [MIGRAÇÃO SCRAPER] INICIANDO O RESGATE DE 90.000 PEDRAS ANTIGAS...")
+    logger.info("🚀 [HISTORICO] INICIANDO O RESGATE DE 5.000 PEDRAS RECENTES...")
     logger.info("="*60)
-    
-    # 1. TRUNCATE removido para preservar dados de lucro recentes.
-    logger.info("Mantendo os dados existentes no banco...")
     
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     
@@ -100,9 +106,10 @@ async def fetch_90k_history():
     }
     
     total_saved = 0
-    pages_to_fetch = 900 # 900 páginas * 100 registros = 90.000 pedras
+    pages_to_fetch = 50 # 50 páginas * 100 registros = 5.000 pedras
+    proxy_url = get_proxy_url()
     
-    async with httpx.AsyncClient(timeout=15.0, headers=headers) as client:
+    async with httpx.AsyncClient(timeout=15.0, headers=headers, proxy=proxy_url) as client:
         for page in range(1, pages_to_fetch + 1):
             records = await fetch_page_with_mirror_rotation(client, page, now_iso)
             
@@ -114,17 +121,16 @@ async def fetch_90k_history():
             for item in records:
                 try:
                     ts_str = item.get("created_at")
-                    # Preservar o timestamp oficial UTC para inserção perfeita no banco timezone-aware
-                    utc_dt = datetime.strptime(ts_str.replace("Z", "+0000"), "%Y-%m-%dT%H:%M:%S.%f%z")
-                    br_time = utc_dt
+                    # Faz o parse da string ISO (suporta com ou sem milissegundos)
+                    utc_dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
                 except Exception:
-                    br_time = datetime.now(timezone.utc) if 'timezone' in globals() else datetime.now()
+                    utc_dt = datetime.now(timezone.utc)
                     
                 db_records.append({
                     "id": str(item["id"]),
                     "color": format_color(item["color"]),
                     "roll": item["roll"],
-                    "timestamp": br_time,
+                    "timestamp": utc_dt,
                     "total_bets": 0.0,
                     "total_payout": 0.0,
                     "house_profit": 0.0
@@ -133,16 +139,15 @@ async def fetch_90k_history():
             await save_results_batch(db_records)
             total_saved += len(db_records)
             
-            if page % 25 == 0 or page == pages_to_fetch:
+            if page % 10 == 0 or page == pages_to_fetch:
                 logger.info(f"📊 Página {page}/{pages_to_fetch} salva. Total até agora: {total_saved} pedras.")
             
             # Pequeno delay para não sobrecarregar a Blaze
             await asyncio.sleep(0.15)
             
     logger.info("="*60)
-    logger.info(f"🎉 Resgate concluído! {total_saved} pedras antigas salvas em BRT com sucesso no banco.")
+    logger.info(f"🎉 Resgate concluído! {total_saved} pedras salvas em UTC com sucesso no banco (sem duplicatas).")
     logger.info("="*60)
 
 if __name__ == "__main__":
-    asyncio.run(fetch_90k_history())
-
+    asyncio.run(fetch_5k_history())
