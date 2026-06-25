@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("BlazeMonitor")
 
 MIRRORS = ["blaze.bet.br", "blaze-6.com", "blaze-7.com", "blaze-8.com"]
-WS_URL  = "wss://api-v2.blaze.bet.br/replication/?EIO=3&transport=websocket"
+WS_URL  = "wss://api-gaming.blaze.bet.br/replication/?EIO=3&transport=websocket"
 
 def format_color(c):
     return {0: "BRANCO", 1: "VERMELHO", 2: "PRETO"}.get(c, "UNKNOWN")
