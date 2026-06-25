@@ -71,7 +71,11 @@ class BlazeMonitor:
         
         def on_frame(frame):
             try:
-                msg = frame.text
+                if isinstance(frame, bytes):
+                    msg = frame.decode("utf-8")
+                else:
+                    msg = str(frame)
+                
                 if not msg or not msg.startswith("42"):
                     return
                 
