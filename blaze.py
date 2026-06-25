@@ -22,7 +22,7 @@ WS_URL  = "wss://api-v2.blaze.bet.br/replication/?EIO=3&transport=websocket"
 def format_color(c):
     return {0: "BRANCO", 1: "VERMELHO", 2: "PRETO"}.get(c, "UNKNOWN")
 
-def save_and_notify(r_id, color_str, roll, created_at, wagered=None, winnings=None, profit=None):
+def save_and_notify(r_id, color_str, roll, created_at, wagered=None, winnings=None, profit=None, total_bets=None, total_payout=None, house_profit=None):
     try:
         from roboblaze_api.db import get_conn
         from roboblaze_api.detector import check_user_signals
@@ -35,13 +35,16 @@ def save_and_notify(r_id, color_str, roll, created_at, wagered=None, winnings=No
             utc = datetime.now(timezone.utc)
 
         cur.execute("""
-            INSERT INTO results (id, color, roll, timestamp, wagered, winnings, profit)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO results (id, color, roll, timestamp, wagered, winnings, profit, total_bets, total_payout, house_profit)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET 
                 wagered = COALESCE(EXCLUDED.wagered, results.wagered),
                 winnings = COALESCE(EXCLUDED.winnings, results.winnings),
-                profit = COALESCE(EXCLUDED.profit, results.profit)
-        """, (r_id, color_str, roll, utc, wagered, winnings, profit))
+                profit = COALESCE(EXCLUDED.profit, results.profit),
+                total_bets = COALESCE(EXCLUDED.total_bets, results.total_bets),
+                total_payout = COALESCE(EXCLUDED.total_payout, results.total_payout),
+                house_profit = COALESCE(EXCLUDED.house_profit, results.house_profit)
+        """, (r_id, color_str, roll, utc, wagered, winnings, profit, total_bets, total_payout, house_profit))
 
         if cur.rowcount > 0:
             payload_str = json.dumps({"id": r_id, "color": color_str, "roll": roll, "timestamp": utc.isoformat()})
@@ -101,13 +104,21 @@ class BlazeMonitor:
                     roll   = payload.get("roll")
                     created = payload.get("created_at", "")
                     
+                    # Extrair lucros globais da sala (house PnL)
+                    total_bets = payload.get("total_bets", 0.0)
+                    total_payout = payload.get("total_payout", 0.0)
+                    try:
+                        house_profit = float(total_bets) - float(total_payout)
+                    except:
+                        house_profit = 0.0
+                    
                     if r_id and r_id not in self.seen_ids and color is not None and roll is not None:
                         self.seen_ids.add(r_id)
                         self.last_stone = time.time()
                         color_str = format_color(color)
                         emoji = {"BRANCO": "⚪", "VERMELHO": "🔴", "PRETO": "⚫"}.get(color_str, "❓")
                         logger.info(f"💎 NOVA PEDRA (WebSocket Nativo): {emoji} {color_str} | Roll: {roll} | ID: {r_id}")
-                        threading.Thread(target=save_and_notify, args=(r_id, color_str, roll, created), daemon=True).start()
+                        threading.Thread(target=save_and_notify, args=(r_id, color_str, roll, created, None, None, None, total_bets, total_payout, house_profit), daemon=True).start()
                         
                         if len(self.seen_ids) > 500:
                             self.seen_ids = set(list(self.seen_ids)[-200:])
@@ -140,19 +151,24 @@ class BlazeMonitor:
                     roll   = record.get("roll")
                     created = record.get("created_at", "")
                     
+                    # A API HTTP não fornece lucros globais de forma direta, mantemos None para preservar os que vieram do WebSocket
+                    total_bets = None
+                    total_payout = None
+                    house_profit = None
+                    
                     if r_id and color is not None and roll is not None:
                         color_str = format_color(color)
                         
                         # Se já vimos a pedra pelo WebSocket, apenas atualizamos o lucro no banco
                         if r_id in self.seen_ids:
                             if profit is not None:
-                                save_and_notify(r_id, color_str, roll, created, wagered, winnings, profit)
+                                save_and_notify(r_id, color_str, roll, created, wagered, winnings, profit, total_bets, total_payout, house_profit)
                         else:
                             # Se for uma pedra nova (fallback HTTP real)
                             self.seen_ids.add(r_id)
                             self.last_stone = time.time()
                             emoji = {"BRANCO": "⚪", "VERMELHO": "🔴", "PRETO": "⚫"}.get(color_str, "❓")
-                            save_and_notify(r_id, color_str, roll, created, wagered, winnings, profit)
+                            save_and_notify(r_id, color_str, roll, created, wagered, winnings, profit, total_bets, total_payout, house_profit)
                 return
             except Exception:
                 continue
