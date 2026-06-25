@@ -37,7 +37,10 @@ def save_and_notify(r_id, color_str, roll, created_at, wagered=None, winnings=No
         cur.execute("""
             INSERT INTO results (id, color, roll, timestamp, wagered, winnings, profit)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (id) DO NOTHING
+            ON CONFLICT (id) DO UPDATE SET 
+                wagered = COALESCE(EXCLUDED.wagered, results.wagered),
+                winnings = COALESCE(EXCLUDED.winnings, results.winnings),
+                profit = COALESCE(EXCLUDED.profit, results.profit)
         """, (r_id, color_str, roll, utc, wagered, winnings, profit))
 
         if cur.rowcount > 0:
@@ -136,14 +139,20 @@ class BlazeMonitor:
                     color  = record.get("color")
                     roll   = record.get("roll")
                     created = record.get("created_at", "")
-                    if r_id and r_id not in self.seen_ids and color is not None and roll is not None:
-                        self.seen_ids.add(r_id)
-                        self.last_stone = time.time()
+                    
+                    if r_id and color is not None and roll is not None:
                         color_str = format_color(color)
-                        emoji = {"BRANCO": "⚪", "VERMELHO": "🔴", "PRETO": "⚫"}.get(color_str, "❓")
-                        # Em background, se a pedra for nova, loga como HTTP (apenas se o ws falhar)
-                        # logger.info(f"💎 NOVA PEDRA (HTTP): {emoji} {color_str} | Roll: {roll}")
-                        save_and_notify(r_id, color_str, roll, created, wagered, winnings, profit)
+                        
+                        # Se já vimos a pedra pelo WebSocket, apenas atualizamos o lucro no banco
+                        if r_id in self.seen_ids:
+                            if profit is not None:
+                                save_and_notify(r_id, color_str, roll, created, wagered, winnings, profit)
+                        else:
+                            # Se for uma pedra nova (fallback HTTP real)
+                            self.seen_ids.add(r_id)
+                            self.last_stone = time.time()
+                            emoji = {"BRANCO": "⚪", "VERMELHO": "🔴", "PRETO": "⚫"}.get(color_str, "❓")
+                            save_and_notify(r_id, color_str, roll, created, wagered, winnings, profit)
                 return
             except Exception:
                 continue
