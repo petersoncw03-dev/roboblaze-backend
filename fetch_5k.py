@@ -61,14 +61,12 @@ async def fetch_page_with_mirror_rotation(client, page, end_date_str, attempt=1)
                 await asyncio.sleep(delay)
                 return await fetch_page_with_mirror_rotation(client, page, end_date_str, attempt + 1)
             else:
-                raise Exception(f"HTTP Status 429 (Rate Limit) após 10 rotações de espelho.")
+                raise Exception(f"HTTP Status 429 (Rate Limit) após 15 tentativas.")
                 
         if response.status_code != 200:
-            if attempt <= 5:
-                current_mirror_idx = (current_mirror_idx + 1) % len(MIRRORS)
-                next_domain = MIRRORS[current_mirror_idx]
-                logger.warning(f"⚠️ [WARNING] Página {page} retornou HTTP {response.status_code} em {domain}. Rotacionando para mirror {next_domain} em 1.5s...")
-                await asyncio.sleep(1.5)
+            if attempt <= 10:
+                logger.warning(f"⚠️ [WARNING] Página {page} retornou HTTP {response.status_code} em {domain}. Tentando novamente em 3s...")
+                await asyncio.sleep(3.0)
                 return await fetch_page_with_mirror_rotation(client, page, end_date_str, attempt + 1)
             else:
                 raise Exception(f"HTTP Status {response.status_code} na página {page}.")
@@ -77,11 +75,9 @@ async def fetch_page_with_mirror_rotation(client, page, end_date_str, attempt=1)
         return data.get("records", [])
         
     except Exception as e:
-        if attempt <= 5:
-            current_mirror_idx = (current_mirror_idx + 1) % len(MIRRORS)
-            next_domain = MIRRORS[current_mirror_idx]
-            logger.warning(f"⚠️ [WARNING] Erro de conexão em {domain}: {e}. Rotacionando para mirror {next_domain} em 1.5s...")
-            await asyncio.sleep(1.5)
+        if attempt <= 10:
+            logger.warning(f"⚠️ [WARNING] Erro de conexão em {domain}: {e}. Tentando novamente em 3s...")
+            await asyncio.sleep(3.0)
             return await fetch_page_with_mirror_rotation(client, page, end_date_str, attempt + 1)
         else:
             raise e
@@ -134,8 +130,8 @@ async def fetch_5k_history():
             if page % 10 == 0 or page == pages_to_fetch:
                 logger.info(f"📊 Página {page}/{pages_to_fetch} salva. Total até agora: {total_saved} pedras.")
             
-            # Pequeno delay para não sobrecarregar a Blaze
-            await asyncio.sleep(0.15)
+            # Delay para não sobrecarregar a Blaze
+            await asyncio.sleep(1.5)
             
     logger.info("="*60)
     logger.info(f"🎉 Resgate concluído! {total_saved} pedras salvas em UTC com sucesso no banco (sem duplicatas).")

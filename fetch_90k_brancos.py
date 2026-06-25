@@ -17,12 +17,6 @@ logger = logging.getLogger("Fetch90k")
 
 # Lista de espelhos da Blaze para contornar qualquer limite da Cloudflare (HTTP 429)
 MIRRORS = [
-    "blaze-6.com",
-    "blaze-7.com",
-    "blaze-8.com",
-    "blaze-9.com",
-    "blaze-10.com",
-    "blaze.com",
     "blaze.bet.br"
 ]
 current_mirror_idx = 0
@@ -50,24 +44,20 @@ async def fetch_page_with_mirror_rotation(client, page, end_date_str, attempt=1)
     try:
         response = await client.get(url)
         
-        # Se for rate limited (429), rotacionamos para o próximo mirror
+        # Se for rate limited (429), aguardamos mais tempo antes de tentar (backoff)
         if response.status_code == 429:
-            if attempt <= 10:
-                old_domain = domain
-                current_mirror_idx = (current_mirror_idx + 1) % len(MIRRORS)
-                new_domain = MIRRORS[current_mirror_idx]
-                logger.warning(f"⚠️ [WARNING] Página {page} retornou HTTP 429 em {old_domain}. Rotacionando para mirror {new_domain} (Tentativa {attempt}/10 em 1.5s)...")
-                await asyncio.sleep(1.5)
+            if attempt <= 15:
+                delay = 3.0 * attempt
+                logger.warning(f"⚠️ [WARNING] Página {page} retornou HTTP 429 em {domain}. Aguardando {delay}s (Tentativa {attempt}/15)...")
+                await asyncio.sleep(delay)
                 return await fetch_page_with_mirror_rotation(client, page, end_date_str, attempt + 1)
             else:
-                raise Exception(f"HTTP Status 429 (Rate Limit) após 10 rotações de espelho.")
+                raise Exception(f"HTTP Status 429 (Rate Limit) após 15 tentativas.")
                 
         if response.status_code != 200:
-            if attempt <= 5:
-                current_mirror_idx = (current_mirror_idx + 1) % len(MIRRORS)
-                next_domain = MIRRORS[current_mirror_idx]
-                logger.warning(f"⚠️ [WARNING] Página {page} retornou HTTP {response.status_code} em {domain}. Rotacionando para mirror {next_domain} em 1.5s...")
-                await asyncio.sleep(1.5)
+            if attempt <= 10:
+                logger.warning(f"⚠️ [WARNING] Página {page} retornou HTTP {response.status_code} em {domain}. Tentando novamente em 3s...")
+                await asyncio.sleep(3.0)
                 return await fetch_page_with_mirror_rotation(client, page, end_date_str, attempt + 1)
             else:
                 raise Exception(f"HTTP Status {response.status_code} na página {page}.")
@@ -76,11 +66,9 @@ async def fetch_page_with_mirror_rotation(client, page, end_date_str, attempt=1)
         return data.get("records", [])
         
     except Exception as e:
-        if attempt <= 5:
-            current_mirror_idx = (current_mirror_idx + 1) % len(MIRRORS)
-            next_domain = MIRRORS[current_mirror_idx]
-            logger.warning(f"⚠️ [WARNING] Erro de conexão em {domain}: {e}. Rotacionando para mirror {next_domain} em 1.5s...")
-            await asyncio.sleep(1.5)
+        if attempt <= 10:
+            logger.warning(f"⚠️ [WARNING] Erro de conexão em {domain}: {e}. Tentando novamente em 3s...")
+            await asyncio.sleep(3.0)
             return await fetch_page_with_mirror_rotation(client, page, end_date_str, attempt + 1)
         else:
             raise e
@@ -140,8 +128,8 @@ async def fetch_90k_history():
             if page % 25 == 0 or page == pages_to_fetch:
                 logger.info(f"📊 Página {page}/{pages_to_fetch} salva. Total até agora: {total_saved} pedras.")
             
-            # Pequeno delay para não sobrecarregar a Blaze
-            await asyncio.sleep(0.15)
+            # Delay para não sobrecarregar a Blaze
+            await asyncio.sleep(1.5)
             
     logger.info("="*60)
     logger.info(f"🎉 Resgate concluído! {total_saved} pedras antigas salvas em BRT com sucesso no banco.")
