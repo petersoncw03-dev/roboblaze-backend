@@ -91,16 +91,16 @@ class BlazeMonitor:
 
             # Tenta 3 formatos diferentes até algum funcionar
             if self.token:
-                # Formato 1: token DENTRO do payload (API atual)
+                # Formatos com autenticação (necessário para salas atuais da Blaze)
+                ws.send(f'42["cmd",{{"id":"subscribe","payload":{{"room":"roulette","token":"{self.token}"}}}}]')
+                ws.send(f'42["cmd",{{"id":"subscribe","payload":{{"room":"double_v2","token":"{self.token}"}}}}]')
                 ws.send(f'42["cmd",{{"id":"subscribe","payload":{{"room":"double_room_1","token":"{self.token}"}}}}]')
-                ws.send(f'42["cmd",{{"id":"subscribe","payload":{{"room":"double","token":"{self.token}"}}}}]')
-                # Formato 2: authenticate separado + subscribe
                 ws.send(f'42["cmd",{{"id":"authenticate","payload":{{"token":"{self.token}"}}}}]')
             
-            # Formato 3: subscribe público (sem token) — fallback
-            ws.send('42["cmd",{"id":"subscribe","payload":{"room":"double_room_1"}}]')
-            ws.send('42["cmd",{"id":"subscribe","payload":{"room":"double"}}]')
-            logger.info("✅ Assinaturas enviadas. Aguardando pedras...")
+            # Formatos públicos (fallback)
+            ws.send('42["cmd",{"id":"subscribe","payload":{"room":"roulette"}}]')
+            ws.send('42["cmd",{"id":"subscribe","payload":{"room":"double_v2"}}]')
+            logger.info("✅ Assinaturas enviadas (Socket). Aguardando pedras...")
             return
 
         # Mensagens de evento
@@ -136,7 +136,7 @@ class BlazeMonitor:
                     self.last_stone = time.time()
                     color_str = format_color(color)
                     emoji = {"BRANCO": "⚪", "VERMELHO": "🔴", "PRETO": "⚫"}.get(color_str, "❓")
-                    logger.info(f"💎 NOVA PEDRA: {emoji} {color_str} | Roll: {roll} | ID: {r_id}")
+                    logger.info(f"💎 NOVA PEDRA (WebSocket): {emoji} {color_str} | Roll: {roll} | ID: {r_id}")
                     threading.Thread(target=save_and_notify, args=(r_id, color_str, roll, created), daemon=True).start()
 
                     if len(self.seen_ids) > 500:
@@ -196,13 +196,21 @@ class BlazeMonitor:
             except Exception:
                 continue
 
-    # ── Watchdog: se ficou 3 min sem pedra, reconecta ──────────────────────
+    # ── Watchdog & Polling Silencioso ──────────────────────────────────────
 
     def _watchdog(self):
         while self.running:
-            time.sleep(30)
+            time.sleep(5) # A cada 5 segundos verifica se saiu pedra nova por HTTP
+            
+            # Se já passaram 5 segundos desde a última pedra, tentamos buscar via HTTP
+            # Isso garante que se o WebSocket não estiver enviando os eventos, ainda pegamos a pedra
+            if time.time() - self.last_stone >= 5:
+                # Não bloqueia o watchdog, faz numa thread rápida
+                threading.Thread(target=self._fetch_and_save_latest, daemon=True).start()
+
+            # Reconexão forçada se passar de 3 min
             if time.time() - self.last_stone > 180:
-                logger.warning("🔁 Sem pedras há 3 min. Forçando reconexão...")
+                logger.warning("🔁 Sem pedras há 3 min. Forçando reconexão do Socket...")
                 self.last_stone = time.time()
                 try:
                     if self.ws:
