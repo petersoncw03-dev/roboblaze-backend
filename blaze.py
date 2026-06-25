@@ -6,7 +6,7 @@ Fallback automático para HTTP se o WebSocket falhar por 2 minutos.
 import os, sys, time, json, threading, logging, requests
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright
+import websocket
 
 project_root = os.path.dirname(os.path.abspath(__file__))
 if project_root not in sys.path:
@@ -68,74 +68,82 @@ class BlazeMonitor:
         self.last_stone  = time.time()
         self.running     = True
 
-    def handle_websocket(self, ws):
-        # Filtra apenas o websocket principal do jogo
-        if "replication" not in ws.url:
-            return
+    def on_message(self, ws, message):
+        try:
+            if message == "2":
+                ws.send("3")
+                return
             
-        logger.info(f"🌐 WebSocket interceptado NATIVAMENTE via Chrome: {ws.url}")
-        
-        def on_frame(frame):
-            try:
-                if isinstance(frame, bytes):
-                    msg = frame.decode("utf-8")
-                else:
-                    msg = str(frame)
+            if message.startswith("40"):
+                logger.info("📡 Conectado ao namespace. Enviando subscription...")
+                payload = {"room": "roulette_games"}
+                if self.token:
+                    payload["token"] = self.token
+                ws.send(f'420["cmd",{{"id":"subscribe","payload":{json.dumps(payload)}}}]')
+                return
                 
-                if not msg or not msg.startswith("42"):
-                    return
-                
-                raw = msg[2:]
-                data = json.loads(raw)
-                if not isinstance(data, list) or len(data) < 2: return
-                
-                event_wrapper = data[1]
-                if not isinstance(event_wrapper, dict): return
-                
-                event_id = event_wrapper.get("id", "")
-                payload  = event_wrapper.get("payload", {})
+            if not message or not message.startswith("42"):
+                return
+            
+            raw = message[2:]
+            data = json.loads(raw)
+            if not isinstance(data, list) or len(data) < 2: return
+            
+            event_wrapper = data[1]
+            if not isinstance(event_wrapper, dict): return
+            
+            event_id = event_wrapper.get("id", "")
+            payload  = event_wrapper.get("payload", {})
 
-                if event_id in ("double.update", "double.tick", "roulette.update"):
-                    status = payload.get("status")
-                    if status not in ("rolling", "complete"): return
-                    
-                    r_id   = str(payload.get("id", ""))
-                    color  = payload.get("color")
-                    roll   = payload.get("roll")
-                    created = payload.get("created_at", "")
-                    
-                    # Extrair lucros globais da sala (house PnL)
-                    total_bets = payload.get("total_bets", 0.0)
-                    total_payout = payload.get("total_payout", 0.0)
-                    try:
-                        house_profit = float(total_bets) - float(total_payout)
-                    except:
-                        house_profit = 0.0
-                    
-                    if r_id and r_id not in self.seen_ids and color is not None and roll is not None:
-                        self.seen_ids.add(r_id)
-                        self.last_stone = time.time()
-                        color_str = format_color(color)
-                        emoji = {"BRANCO": "⚪", "VERMELHO": "🔴", "PRETO": "⚫"}.get(color_str, "❓")
-                        logger.info(f"💎 NOVA PEDRA (WebSocket Nativo): {emoji} {color_str} | Roll: {roll} | ID: {r_id}")
-                        threading.Thread(target=save_and_notify, args=(r_id, color_str, roll, created, None, None, None, total_bets, total_payout, house_profit), daemon=True).start()
-                        
-                        if len(self.seen_ids) > 500:
-                            self.seen_ids = set(list(self.seen_ids)[-200:])
-                            
-                elif event_id == "wallet.bet-resulted":
-                    game = payload.get("game_slug", "")
-                    if "double" in game.lower():
-                        logger.info("💡 Aposta liquidada detectada...")
-                        threading.Thread(
-                            target=self._fetch_and_save_latest, 
-                            kwargs={"wagered": payload.get("wagered"), "winnings": payload.get("winnings"), "profit": payload.get("profit")},
-                            daemon=True
-                        ).start()
-            except Exception:
-                pass
+            if event_id in ("double.update", "double.tick", "roulette.update"):
+                status = payload.get("status")
+                if status not in ("rolling", "complete"): return
                 
-        ws.on("framereceived", on_frame)
+                r_id   = str(payload.get("id", ""))
+                color  = payload.get("color")
+                roll   = payload.get("roll")
+                created = payload.get("created_at", "")
+                
+                # Extrair lucros globais da sala (house PnL)
+                total_bets = payload.get("total_bets", 0.0)
+                total_payout = payload.get("total_payout", 0.0)
+                try:
+                    house_profit = float(total_bets) - float(total_payout)
+                except:
+                    house_profit = 0.0
+                
+                if r_id and r_id not in self.seen_ids and color is not None and roll is not None:
+                    self.seen_ids.add(r_id)
+                    self.last_stone = time.time()
+                    color_str = format_color(color)
+                    emoji = {"BRANCO": "⚪", "VERMELHO": "🔴", "PRETO": "⚫"}.get(color_str, "❓")
+                    logger.info(f"💎 NOVA PEDRA (WebSocket Leve): {emoji} {color_str} | Roll: {roll} | ID: {r_id}")
+                    threading.Thread(target=save_and_notify, args=(r_id, color_str, roll, created, None, None, None, total_bets, total_payout, house_profit), daemon=True).start()
+                    
+                    if len(self.seen_ids) > 500:
+                        self.seen_ids = set(list(self.seen_ids)[-200:])
+                        
+            elif event_id == "wallet.bet-resulted":
+                game = payload.get("game_slug", "")
+                if "double" in game.lower():
+                    logger.info("💡 Aposta liquidada detectada...")
+                    threading.Thread(
+                        target=self._fetch_and_save_latest, 
+                        kwargs={"wagered": payload.get("wagered"), "winnings": payload.get("winnings"), "profit": payload.get("profit")},
+                        daemon=True
+                    ).start()
+        except Exception as e:
+            pass
+
+    def on_error(self, ws, error):
+        logger.error(f"❌ WebSocket Erro: {error}")
+
+    def on_close(self, ws, close_status_code, close_msg):
+        logger.warning("🔌 WebSocket Fechado. Reconectando em breve...")
+
+    def on_open(self, ws):
+        logger.info(f"✅ Conexão WebSocket estabelecida! Enviando init...")
+        ws.send("40")
 
     # ── HTTP fallback ───────────────────
     def _fetch_and_save_latest(self, wagered=None, winnings=None, profit=None):
@@ -181,7 +189,7 @@ class BlazeMonitor:
                 logger.warning("🔁 Sem pedras há 5 min. Reiniciando processo...")
                 os._exit(1) # Força o Docker/Easypanel a reiniciar o container limpo
 
-    # ── Start Playwright ───────────────────────────────────────────────────
+    # ── Start WebSocket ───────────────────────────────────────────────────
     def start_ws(self):
         # Garante que as colunas existam no banco
         try:
@@ -202,33 +210,26 @@ class BlazeMonitor:
         except Exception as e:
             logger.error(f"⚠️ Erro ao atualizar schema DB: {e}")
 
-        logger.info("🚀 Inicializando Navegador Headless Anti-Bot (Playwright)...")
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"])
-            page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            
-            # Configura a captura do WebSocket ANTES de navegar
-            page.on("websocket", self.handle_websocket)
-
-            # Primeiro carrega a home para injetar o token no localStorage
-            logger.info("🌐 Acessando Blaze.bet.br...")
+        logger.info("🚀 Inicializando WebSockets leves...")
+        headers = ["User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"]
+        
+        while self.running:
             try:
-                page.goto("https://blaze.bet.br/", timeout=60000)
-                if self.token:
-                    logger.info("🔑 Injetando Token de Autenticação...")
-                    page.evaluate(f"localStorage.setItem('token', '{self.token}');")
-                
-                logger.info("🎲 Navegando para o jogo Double e escutando conexões...")
-                page.goto("https://blaze.bet.br/pt/games/double", timeout=60000)
+                ws = websocket.WebSocketApp(
+                    WS_URL,
+                    header=headers,
+                    on_open=self.on_open,
+                    on_message=self.on_message,
+                    on_error=self.on_error,
+                    on_close=self.on_close
+                )
+                ws.run_forever()
             except Exception as e:
-                logger.error(f"Erro ao navegar na Blaze: {e}")
-                
-            # Mantém a página viva e o event loop rodando
-            while self.running:
-                page.wait_for_timeout(1000)
+                logger.error(f"Erro no loop do WS: {e}")
+            time.sleep(3)
 
     def start(self):
-        logger.info("🚀 BlazeMonitor iniciado (Modo Headless Browser Native)")
+        logger.info("🚀 BlazeMonitor iniciado (Modo Leve WebSocket)")
         self.last_stone = time.time()
         threading.Thread(target=self._watchdog, daemon=True).start()
         self.start_ws()

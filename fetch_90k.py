@@ -44,14 +44,12 @@ async def fetch_page_with_mirror_rotation(client, page, end_date_str, attempt=1)
     try:
         response = await client.get(url)
         
-        # Se for rate limited (429), rotacionamos para o próximo mirror
+        # Se for rate limited (429), aguardamos mais tempo antes de tentar (backoff)
         if response.status_code == 429:
-            if attempt <= 10:
-                old_domain = domain
-                current_mirror_idx = (current_mirror_idx + 1) % len(MIRRORS)
-                new_domain = MIRRORS[current_mirror_idx]
-                logger.warning(f"⚠️ [WARNING] Página {page} retornou HTTP 429 em {old_domain}. Rotacionando para mirror {new_domain} (Tentativa {attempt}/10 em 1.5s)...")
-                await asyncio.sleep(1.5)
+            if attempt <= 15:
+                delay = 3.0 * attempt
+                logger.warning(f"⚠️ [WARNING] Página {page} retornou HTTP 429 em {domain}. Aguardando {delay}s (Tentativa {attempt}/15)...")
+                await asyncio.sleep(delay)
                 return await fetch_page_with_mirror_rotation(client, page, end_date_str, attempt + 1)
             else:
                 raise Exception(f"HTTP Status 429 (Rate Limit) após 10 rotações de espelho.")
