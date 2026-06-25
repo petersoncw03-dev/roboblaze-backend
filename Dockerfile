@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY version.txt .
 # Copia os arquivos da API e do Bot
 COPY roboblaze_api/ ./roboblaze_api/
+COPY roboblaze_scraper/ ./roboblaze_scraper/
 COPY blaze.py .
 
 # Comando padrão será rodar a API (o worker será sobrescrito no docker-compose)
