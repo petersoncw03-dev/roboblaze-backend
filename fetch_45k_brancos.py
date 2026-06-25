@@ -73,17 +73,13 @@ async def fetch_page_with_mirror_rotation(client, page, end_date_str, attempt=1)
         else:
             raise e
 
-async def fetch_90k_history():
+async def fetch_45k_brancos():
     logger.info("="*60)
-    logger.info("🚀 [MIGRAÇÃO SCRAPER] INICIANDO O RESGATE DE 90.000 PEDRAS ANTIGAS...")
+    logger.info("🚀 INICIANDO O RESGATE DE PEDRAS BRANCAS ANTIGAS...")
     logger.info("="*60)
     
-    # 1. Limpar tabela results por completo antes de começar
-    logger.info("🧹 Limpando tabela de resultados no PostgreSQL para alinhamento 100% limpo...")
-    async with AsyncSessionLocal() as session:
-        await session.execute(text("TRUNCATE TABLE results;"))
-        await session.commit()
-    logger.info("✅ Tabela results limpa com sucesso.")
+    # ⚠️ AVISO: TRUNCATE removido para NÃO apagar dados antigos do banco!
+    logger.info("✅ Mantendo dados antigos intactos.")
     
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     
@@ -92,7 +88,7 @@ async def fetch_90k_history():
     }
     
     total_saved = 0
-    pages_to_fetch = 900 # 900 páginas * 100 registros = 90.000 pedras
+    pages_to_fetch = 9000 # 9000 páginas * 100 registros = 900.000 pedras totais para achar os brancos
     
     async with httpx.AsyncClient(timeout=15.0, headers=headers) as client:
         for page in range(1, pages_to_fetch + 1):
@@ -104,13 +100,16 @@ async def fetch_90k_history():
                 
             db_records = []
             for item in records:
+                # Filtrar APENAS os Brancos
+                if item["color"] != 0:
+                    continue
+                    
                 try:
                     ts_str = item.get("created_at")
-                    # Preservar o timestamp oficial UTC para inserção perfeita no banco timezone-aware
                     utc_dt = datetime.strptime(ts_str.replace("Z", "+0000"), "%Y-%m-%dT%H:%M:%S.%f%z")
                     br_time = utc_dt
                 except Exception:
-                    br_time = datetime.now(timezone.utc) if 'timezone' in globals() else datetime.now()
+                    br_time = datetime.now(timezone.utc)
                     
                 db_records.append({
                     "id": str(item["id"]),
@@ -122,19 +121,24 @@ async def fetch_90k_history():
                     "house_profit": 0.0
                 })
                 
-            await save_results_batch(db_records)
-            total_saved += len(db_records)
+            if db_records:
+                await save_results_batch(db_records)
+                total_saved += len(db_records)
             
             if page % 25 == 0 or page == pages_to_fetch:
-                logger.info(f"📊 Página {page}/{pages_to_fetch} salva. Total até agora: {total_saved} pedras.")
+                logger.info(f"📊 Página {page}/{pages_to_fetch} processada. Total de BRANCOS achados: {total_saved}.")
+                
+            if total_saved >= 45000:
+                logger.info("🎯 Meta de 45.000 brancos alcançada! Parando a busca.")
+                break
             
             # Delay para não sobrecarregar a Blaze
             await asyncio.sleep(1.5)
             
     logger.info("="*60)
-    logger.info(f"🎉 Resgate concluído! {total_saved} pedras antigas salvas em BRT com sucesso no banco.")
+    logger.info(f"🎉 Resgate concluído! {total_saved} brancos antigos checados/salvos no banco.")
     logger.info("="*60)
 
 if __name__ == "__main__":
-    asyncio.run(fetch_90k_history())
+    asyncio.run(fetch_45k_brancos())
 
