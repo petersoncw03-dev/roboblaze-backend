@@ -36,7 +36,7 @@ MIRRORS = [
     "blaze-9.com",
     "blaze-10.com",
 ]
-POLL_INTERVAL = 8  # segundos entre cada consulta
+POLL_INTERVAL = 3  # segundos entre cada consulta (rodadas duram ~30-40s)
 # ──────────────────────────────────────────────────────────
 
 def format_color(color_int: int) -> str:
