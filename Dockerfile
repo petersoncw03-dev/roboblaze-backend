@@ -14,6 +14,7 @@ COPY roboblaze_scraper/ ./roboblaze_scraper/
 COPY blaze.py .
 COPY fetch_90k.py .
 COPY fetch_45k_brancos.py .
+COPY fetch_next_120k.py .
 COPY fetch_5k.py .
 
 # Comando padrão será rodar a API (o worker será sobrescrito no docker-compose)
