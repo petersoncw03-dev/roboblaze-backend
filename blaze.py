@@ -216,6 +216,9 @@ class BlazeMonitor:
                     print(f"❌ Erro de rede ao renovar token: {e}")
 
     def on_message(self, ws, message):
+        # DEBUG TOTAL: loga TUDO que a Blaze mandar
+        if message not in ["2", "3"]:
+            print(f"🔍 RAW [{len(message)}]: {message[:200]}", flush=True)
         if message == "2":
             ws.send("3")
         elif message == "3":
