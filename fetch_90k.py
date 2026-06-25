@@ -17,12 +17,6 @@ logger = logging.getLogger("Fetch90k")
 
 # Lista de espelhos da Blaze para contornar qualquer limite da Cloudflare (HTTP 429)
 MIRRORS = [
-    "blaze-6.com",
-    "blaze-7.com",
-    "blaze-8.com",
-    "blaze-9.com",
-    "blaze-10.com",
-    "blaze.com",
     "blaze.bet.br"
 ]
 current_mirror_idx = 0
