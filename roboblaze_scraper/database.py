@@ -9,8 +9,18 @@ from urllib.parse import urlparse
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 db_logger = logging.getLogger("DB_INIT")
 
-# Puxa a URL do banco do arquivo .env ou do painel Easypanel
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/roboblaze")
+# Constrói a URL a partir das variáveis de ambiente (padrão do Easypanel/Docker Compose)
+db_user = os.getenv("DB_USER", "postgres")
+db_pass = os.getenv("DB_PASS", "125320")
+db_host = os.getenv("DB_HOST", "db")
+db_port = os.getenv("DB_PORT", "5432")
+db_name = os.getenv("DB_NAME", "roboblazedados")
+
+# Usa DATABASE_URL se existir (prioridade), senão monta com as variáveis do docker-compose
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", 
+    f"postgresql+asyncpg://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+)
 
 engine = create_async_engine(
     DATABASE_URL, 
