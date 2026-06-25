@@ -107,12 +107,26 @@ class BlazeMonitor:
                 roll   = payload.get("roll")
                 created = payload.get("created_at", "")
                 
-                # Extrair lucros globais da sala (house PnL)
-                total_bets = payload.get("total_bets", 0.0)
-                total_payout = payload.get("total_payout", 0.0)
+                # Extrair lucros globais da sala (house PnL) - Novo formato da Blaze
                 try:
-                    house_profit = float(total_bets) - float(total_payout)
+                    red_bets = float(payload.get("total_red_eur_bet", 0.0))
+                    white_bets = float(payload.get("total_white_eur_bet", 0.0))
+                    black_bets = float(payload.get("total_black_eur_bet", 0.0))
+                    
+                    total_bets = red_bets + white_bets + black_bets
+                    
+                    total_payout = 0.0
+                    if color == 1:
+                        total_payout = red_bets * 2.0
+                    elif color == 2:
+                        total_payout = black_bets * 2.0
+                    elif color == 0:
+                        total_payout = white_bets * 14.0
+                        
+                    house_profit = total_bets - total_payout
                 except:
+                    total_bets = 0.0
+                    total_payout = 0.0
                     house_profit = 0.0
                 
                 if r_id and r_id not in self.seen_ids and color is not None and roll is not None:
