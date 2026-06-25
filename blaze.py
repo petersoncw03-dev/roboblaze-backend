@@ -47,7 +47,7 @@ def save_and_notify(r_id, color_str, roll, created_at, wagered=None, winnings=No
         """, (r_id, color_str, roll, utc, wagered, winnings, profit, total_bets, total_payout, house_profit))
 
         if cur.rowcount > 0:
-            payload_str = json.dumps({"id": r_id, "color": color_str, "roll": roll, "timestamp": utc.isoformat()})
+            payload_str = json.dumps({"id": r_id, "color": color_str, "roll": roll, "timestamp": utc.isoformat(), "house_profit": house_profit})
             cur.execute(f"NOTIFY nova_pedra, '{payload_str}'")
             conn.commit()
             cur.execute("SELECT roll, color FROM results ORDER BY timestamp DESC LIMIT 50")
