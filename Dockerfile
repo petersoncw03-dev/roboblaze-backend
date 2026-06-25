@@ -1,13 +1,10 @@
-FROM python:3.10-slim
+FROM mcr.microsoft.com/playwright/python:v1.42.0-jammy
 
 WORKDIR /app
 
-# Instalar dependências essenciais do sistema
-RUN apt-get update && apt-get install -y libpq-dev gcc && rm -rf /var/lib/apt/lists/*
-
+# Instalar dependências python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN playwright install chromium --with-deps
 
 # Quebrar cache
 COPY version.txt .
