@@ -232,6 +232,8 @@ class BlazeMonitor:
             
             print("🚀 Enviando inscrição EXCLUSIVA para salas de Resultado (Foco em HFT)...", flush=True)
             ws.send('420["cmd",{"id":"subscribe","payload":{"room":"double_room_1"}}]')
+            ws.send('421["cmd",{"id":"subscribe","payload":{"room":"double"}}]')
+            ws.send('422["cmd",{"id":"subscribe","payload":{"room":"roulette"}}]')
             print("✅ Monitoramento HFT ativo. Aguardando resultados ao vivo sem lag...", flush=True)
             
         elif message.startswith("42"):
