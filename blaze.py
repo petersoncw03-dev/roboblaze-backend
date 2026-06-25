@@ -233,11 +233,10 @@ class BlazeMonitor:
                     ws.send(f'42["cmd",{{"id":"authenticate","payload":{{"token":"{self.access_token}"}}}}]')
                     ws.send(f'42["cmd",{{"id":"trackTime","payload":{{"token":"{self.access_token}"}}}}]')
             
-            print("🚀 Enviando inscrição EXCLUSIVA para salas de Resultado (Foco em HFT)...", flush=True)
-            ws.send('420["cmd",{"id":"subscribe","payload":{"room":"double_room_1"}}]')
-            ws.send('421["cmd",{"id":"subscribe","payload":{"room":"double"}}]')
-            ws.send('422["cmd",{"id":"subscribe","payload":{"room":"roulette"}}]')
-            print("✅ Monitoramento HFT ativo. Aguardando resultados ao vivo sem lag...", flush=True)
+            print("🚀 Enviando inscrição para salas de Resultado...", flush=True)
+            ws.send('42["cmd",{"id":"subscribe","payload":{"room":"double_room_1"}}]')
+            ws.send('42["cmd",{"id":"subscribe","payload":{"room":"double"}}]')
+            print("✅ Monitoramento ativo. Aguardando resultados ao vivo...", flush=True)
             
         elif message.startswith("42"):
             # DEBUG TEMP: ver mensagens cruas da Blaze
