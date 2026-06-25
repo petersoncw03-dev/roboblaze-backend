@@ -75,11 +75,14 @@ class BlazeMonitor:
                 return
             
             if message.startswith("40"):
-                logger.info("📡 Conectado ao namespace. Enviando subscription...")
-                payload = {"room": "roulette_games"}
-                if self.token:
-                    payload["token"] = self.token
-                ws.send(f'420["cmd",{{"id":"subscribe","payload":{json.dumps(payload)}}}]')
+                logger.info("📡 Conectado ao namespace. Enviando subscriptions...")
+                
+                rooms = ["double_room_1", "double_room_2", "double_v2", "roulette", "roulette_games"]
+                for i, room in enumerate(rooms):
+                    payload = {"room": room}
+                    if self.token:
+                        payload["token"] = self.token
+                    ws.send(f'42{i}["cmd",{{"id":"subscribe","payload":{json.dumps(payload)}}}]')
                 return
                 
             if not message or not message.startswith("42"):
@@ -144,6 +147,16 @@ class BlazeMonitor:
     def on_open(self, ws):
         logger.info(f"✅ Conexão WebSocket estabelecida! Enviando init...")
         ws.send("40")
+        
+        # Ping thread (Engine.io v4 requires client to ping)
+        def ping_loop():
+            while self.running and ws.sock and ws.sock.connected:
+                time.sleep(20)
+                try:
+                    ws.send("2")
+                except:
+                    break
+        threading.Thread(target=ping_loop, daemon=True).start()
 
     # ── HTTP fallback ───────────────────
     def _fetch_and_save_latest(self, wagered=None, winnings=None, profit=None):
