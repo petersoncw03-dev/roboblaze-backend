@@ -1,0 +1,26 @@
+# Ambientes e Segredos
+.env
+.env.local
+credentials.json
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*.class
+venv/
+.venv/
+env/
+.pytest_cache/
+
+# Docker
+postgres_data/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Ignorar banco local e zips
+*.db
+*.zip
+*.log
