@@ -22,7 +22,7 @@ WS_URL  = "wss://api-v2.blaze.bet.br/replication/?EIO=3&transport=websocket"
 def format_color(c):
     return {0: "BRANCO", 1: "VERMELHO", 2: "PRETO"}.get(c, "UNKNOWN")
 
-def save_and_notify(r_id, color_str, roll, created_at):
+def save_and_notify(r_id, color_str, roll, created_at, wagered=None, winnings=None, profit=None):
     try:
         from roboblaze_api.db import get_conn
         from roboblaze_api.detector import check_user_signals
@@ -35,10 +35,10 @@ def save_and_notify(r_id, color_str, roll, created_at):
             utc = datetime.now(timezone.utc)
 
         cur.execute("""
-            INSERT INTO results (id, color, roll, timestamp)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO results (id, color, roll, timestamp, wagered, winnings, profit)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO NOTHING
-        """, (r_id, color_str, roll, utc))
+        """, (r_id, color_str, roll, utc, wagered, winnings, profit))
 
         if cur.rowcount > 0:
             payload_str = json.dumps({"id": r_id, "color": color_str, "roll": roll, "timestamp": utc.isoformat()})
@@ -147,7 +147,16 @@ class BlazeMonitor:
                 game = payload.get("game_slug", "")
                 if "double" in game.lower():
                     logger.info("💡 Aposta liquidada detectada. Buscando resultado via HTTP...")
-                    threading.Thread(target=self._fetch_and_save_latest, daemon=True).start()
+                    # Pass the profit data to the fetch function so it can save it with the latest stone
+                    threading.Thread(
+                        target=self._fetch_and_save_latest, 
+                        kwargs={
+                            "wagered": payload.get("wagered"),
+                            "winnings": payload.get("winnings"),
+                            "profit": payload.get("profit")
+                        },
+                        daemon=True
+                    ).start()
 
         except Exception:
             pass
@@ -163,7 +172,7 @@ class BlazeMonitor:
 
     # ── HTTP fallback (acionado por wallet.bet-resulted) ───────────────────
 
-    def _fetch_and_save_latest(self):
+    def _fetch_and_save_latest(self, wagered=None, winnings=None, profit=None):
         for domain in MIRRORS:
             try:
                 url = f"https://{domain}/api/singleplayer-originals/originals/roulette_games/recent/history/1?page=1"
@@ -182,7 +191,7 @@ class BlazeMonitor:
                         color_str = format_color(color)
                         emoji = {"BRANCO": "⚪", "VERMELHO": "🔴", "PRETO": "⚫"}.get(color_str, "❓")
                         logger.info(f"💎 NOVA PEDRA (HTTP): {emoji} {color_str} | Roll: {roll} | ID: {r_id}")
-                        save_and_notify(r_id, color_str, roll, created)
+                        save_and_notify(r_id, color_str, roll, created, wagered, winnings, profit)
                 return
             except Exception:
                 continue
@@ -204,6 +213,35 @@ class BlazeMonitor:
     # ── Start ──────────────────────────────────────────────────────────────
 
     def start_ws(self):
+        # Garante que as colunas existam no banco
+        try:
+            from roboblaze_api.db import get_conn
+            conn = get_conn(dict_cursor=False)
+            cur = conn.cursor()
+            cur.execute("ALTER TABLE results ADD COLUMN IF NOT EXISTS wagered NUMERIC(15,2);")
+            cur.execute("ALTER TABLE results ADD COLUMN IF NOT EXISTS winnings NUMERIC(15,2);")
+            cur.execute("ALTER TABLE results ADD COLUMN IF NOT EXISTS profit NUMERIC(15,2);")
+            
+            # Criar VIEW de lucro diário para facilitar o gráfico do frontend
+            cur.execute("""
+                CREATE OR REPLACE VIEW daily_pnl AS
+                SELECT 
+                    DATE(timestamp) AS day,
+                    SUM(wagered) AS total_wagered,
+                    SUM(winnings) AS total_winnings,
+                    SUM(profit) AS net_profit,
+                    COUNT(*) AS rounds
+                FROM results 
+                WHERE profit IS NOT NULL
+                GROUP BY DATE(timestamp)
+                ORDER BY day DESC;
+            """)
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.error(f"⚠️ Erro ao atualizar schema DB: {e}")
+
         headers = {
             "Origin": "https://blaze.bet.br",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
