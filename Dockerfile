@@ -15,4 +15,4 @@ COPY roboblaze_api/ ./roboblaze_api/
 COPY blaze.py .
 
 # Comando padrão será rodar a API (o worker será sobrescrito no docker-compose)
-CMD ["uvicorn", "roboblaze_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "roboblaze_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "12"]
