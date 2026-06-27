@@ -81,15 +81,15 @@ async def fetch_120_days_history():
     
     total_saved = 0
     # 60 dias a mais = ~172.800 pedras -> 1.728 páginas
-    # Vamos buscar 1.800 páginas apenas para garantir uma margem.
     pages_to_fetch = 1800 
     
     async with httpx.AsyncClient(timeout=20.0, headers=headers) as client:
-        for page in range(1, pages_to_fetch + 1):
-            records = await fetch_page_with_mirror_rotation(client, page, end_date_str)
+        for request_idx in range(1, pages_to_fetch + 1):
+            # Sempre buscamos a page=1, mas deslocamos o cursor do tempo (end_date_str)
+            records = await fetch_page_with_mirror_rotation(client, 1, end_date_str)
             
             if not records:
-                logger.warning(f"Página {page} vazia. Chegamos ao limite máximo da Blaze?")
+                logger.warning(f"Resposta vazia na iteração {request_idx}. Chegamos ao limite máximo da Blaze?")
                 break
                 
             db_records = []
@@ -114,8 +114,13 @@ async def fetch_120_days_history():
             await save_results_batch(db_records)
             total_saved += len(db_records)
             
-            if page % 25 == 0 or page == pages_to_fetch:
-                logger.info(f"📊 Página {page}/{pages_to_fetch} salva. Total extraído hoje: {total_saved} pedras. Último registro lido: {db_records[-1]['timestamp']}")
+            # Atualiza o end_date_str para ser a data da ÚLTIMA pedra dessa página
+            # Assim, a próxima requisição na page=1 pegará dados A PARTIR daqui para trás.
+            last_record = records[-1]
+            end_date_str = last_record.get("created_at")
+            
+            if request_idx % 25 == 0 or request_idx == pages_to_fetch:
+                logger.info(f"📊 Lote {request_idx}/{pages_to_fetch} salvo. Total extraído hoje: {total_saved} pedras. Último registro lido: {db_records[-1]['timestamp']}")
             
             # Delay anti-block
             await asyncio.sleep(1.0)
