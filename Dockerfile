@@ -16,6 +16,7 @@ COPY fetch_90k.py .
 COPY fetch_45k_brancos.py .
 COPY fetch_next_120k.py .
 COPY fetch_5k.py .
+COPY fetch_120_days.py .
 
 # Comando padrão será rodar a API (o worker será sobrescrito no docker-compose)
 CMD ["uvicorn", "roboblaze_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
