@@ -45,6 +45,14 @@ def get_latest_results(limit=500):
         return []
 
 
+def run_refresh_job():
+    try:
+        auto_refresh_strategies()
+    except Exception as e:
+        log(f"❌ [Fábrica] Erro no recálculo: {e}")
+
+
+
 # Evento para sinalizar parada do scheduler
 _stop_event = threading.Event()
 
@@ -65,14 +73,8 @@ def run_scheduler():
                     
                     global _refresh_process
                     # 1) Recalcula padrões das configs salvas (em processo separado para não travar a API)
-                    def run_refresh():
-                        try:
-                            auto_refresh_strategies()
-                        except Exception as e:
-                            log(f"❌ [Fábrica] Erro no recálculo: {e}")
-                    
                     if _refresh_process is None or not _refresh_process.is_alive():
-                        _refresh_process = Process(target=run_refresh, daemon=True)
+                        _refresh_process = Process(target=run_refresh_job, daemon=True)
                         _refresh_process.start()
                     else:
                         log("⚠️ [Fábrica] Recálculo anterior ainda rodando. Ignorando para evitar sobrecarga...")
