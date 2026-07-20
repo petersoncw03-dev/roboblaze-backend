@@ -1,23 +1,21 @@
-FROM mcr.microsoft.com/playwright/python:v1.42.0-jammy
+FROM python:3.10-slim
+
+# Impede o Python de gerar arquivos .pyc e de manter o stdout travado no buffer
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Instalar dependências python
+# Instala as dependências necessárias para compilar o asyncpg se precisar (opcional, mas recomendado)
+RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Quebrar cache
-COPY version.txt .
-# Copia os arquivos da API e do Bot
-COPY roboblaze_api/ ./roboblaze_api/
-COPY roboblaze_scraper/ ./roboblaze_scraper/
-COPY blaze.py .
-COPY fetch_90k.py .
-COPY fetch_45k_brancos.py .
-COPY fetch_next_120k.py .
-COPY fetch_5k.py .
-COPY fetch_120_days.py .
-COPY fetch_260k.py .
+COPY . .
 
-# Comando padrão será rodar a API (o worker será sobrescrito no docker-compose)
-CMD ["uvicorn", "roboblaze_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Expõe a porta do FastAPI
+EXPOSE 8000
+
+# Roda o FastAPI via Uvicorn
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

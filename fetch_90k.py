@@ -9,7 +9,7 @@ import time
 from dotenv import load_dotenv
 
 # Importa as configurações do banco de dados do main/database
-from roboblaze_scraper.database import AsyncSessionLocal, Result
+from database import AsyncSessionLocal, Result
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")

@@ -5,7 +5,7 @@ import logging
 from sqlalchemy.dialects.postgresql import insert
 import os
 
-from roboblaze_scraper.database import AsyncSessionLocal, Result
+from database import AsyncSessionLocal, Result
 from dotenv import load_dotenv
 
 load_dotenv()
