@@ -7,7 +7,7 @@ import os
 from dotenv import load_dotenv
 
 # Importa as configurações do banco de dados
-from roboblaze_scraper.database import AsyncSessionLocal, Result
+from roboblaze_scraper.database import AsyncSessionLocal, Result, init_db
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -84,6 +84,9 @@ async def fetch_page_with_mirror_rotation(client, page, end_date_str, attempt=1)
             raise e
 
 async def fetch_260k_history():
+    # Garante que as tabelas existem no banco
+    await init_db()
+    
     logger.info("="*60)
     logger.info("🚀 [HISTORICO] INICIANDO O RESGATE DE 260.000 PEDRAS (3 MESES)...")
     logger.info("="*60)
