@@ -211,9 +211,9 @@ async def worker_a_websocket():
                                             last_saved_id = str(r_id)
                                             
                                             # Blaze envia os totais agrupados por cor
-                                            t_red = float(inner_payload.get("total_red_eur_bet", 0) or 0)
-                                            t_white = float(inner_payload.get("total_white_eur_bet", 0) or 0)
-                                            t_black = float(inner_payload.get("total_black_eur_bet", 0) or 0)
+                                            t_red = float(inner_payload.get("total_red_bet") or inner_payload.get("total_red_eur_bet") or 0)
+                                            t_white = float(inner_payload.get("total_white_bet") or inner_payload.get("total_white_eur_bet") or 0)
+                                            t_black = float(inner_payload.get("total_black_bet") or inner_payload.get("total_black_eur_bet") or 0)
                                             
                                             calc_total_bets = t_red + t_white + t_black
                                             
